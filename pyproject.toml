@@ -24,13 +24,13 @@ dependencies = [
   "python-json-logger",
   "requests",
   "SQLAlchemy",
-  "psqlgraph",
-  "gdcdictionary",
-  "gdcdatamodel2",
-  "gdc-ng-models",
-  "indexclient",
-  "queueclient",
-  "gdcmodels"
+  "psqlgraph @ git+https://github.com/NCI-GDC/psqlgraph.git@develop",
+  "gdcdictionary @ git+https://github.com/uc-cdis/mmrf_dictionary.git@master",
+  "gdcdatamodel2 @ git+https://github.com/uc-cdis/mmrfdatamodel2.git@mmrf",
+  "gdc-ng-models @ git+https://github.com/NCI-GDC/gdc-ng-models.git@develop",
+  "indexclient @ git+https://github.com/NCI-GDC/indexclient.git@develop",
+  "queueclient @ git+https://github.com/NCI-GDC/queueclient.git#develop",
+  "gdcmodels @ git+https://github.com/uc-cdis/mmrf-models.git#mmrf"
 ]
 description = "Repository for building the GDC Elasticsearch indices."
 dynamic = ["version"]

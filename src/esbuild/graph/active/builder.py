@@ -57,6 +57,17 @@ FILE_NODES = frozenset(
         models.SubmittedGenomicProfile,
         models.SubmittedGenotypingArray,
         models.SubmittedUnalignedReads,
+
+        models.Cytof,
+        models.FilteredCopyNumberSegment,
+        models.GermlineCopyNumberAuxiliaryFile,
+        models.GermlineCopyNumberEstimate,
+        models.GermlineCopyNumberSegment,
+        models.GermlineStructuralVariation,
+        models.SubmittedMethylationBetaValue,
+        models.SubmittedTangentCopyNumber,
+
+        models.File,
     }
 )
 EXCLUDED_FILE_PATHS = frozenset(
@@ -64,7 +75,7 @@ EXCLUDED_FILE_PATHS = frozenset(
         models.AlignmentCocleaningWorkflow,
         models.Archive,
         models.Diagnosis,
-        models.File,
+        # models.File,
     }
 )
 
@@ -101,7 +112,7 @@ class ActiveGraphIndexBuilder(builder.GraphIndexBuilder):
     }
 
     file_labels = _node_labels_by_category(
-        "data_file", "index_file", excluded=("archive", "file")
+        "data_file", "index_file", "file", excluded=("archive")
     )
 
     # Specify which analysis nodes get which types of

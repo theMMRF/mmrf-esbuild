@@ -58,6 +58,9 @@ FILE_TREE = {
 CASE_TREE = {
     "case": {
         "corr": (ONE_TO_MANY, "cases"),
+        "bone_assessment": {"corr": (ONE_TO_MANY, "bone_assessments")},
+        "administered_regimen_line": {"corr": (ONE_TO_MANY, "administered_regimen_lines")},
+        "outcomes":  {"corr": (ONE_TO_MANY, "outcomes")},
         "annotation": {"corr": (ONE_TO_MANY, "annotations")},
         "project": {
             "corr": (ONE_TO_ONE, "project"),

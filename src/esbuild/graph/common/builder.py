@@ -513,6 +513,9 @@ class GraphIndexBuilder:
             }
         )
 
+        if "object_id" in base:
+            base["file_id"] = base["object_id"]
+
         return base
 
     ###################################################################
@@ -851,11 +854,12 @@ class GraphIndexBuilder:
             return node
 
         # Try to get cached metadata value
-        record = self.file_metadata.get(node.node_id)
+        record = self.file_metadata.get(node.object_id)
 
         # If not found, get it from indexd
         if not record:
-            record = self.indexd.get(node.node_id)
+            # record = self.indexd.get(node.node_id)
+            record = self.indexd.get(node.object_id)
 
             if not record:
                 if node.sysan.get("to_delete"):
@@ -1319,6 +1323,7 @@ class GraphIndexBuilder:
             doc["associated_entities"] = docs
 
     def _upsert_file_into_dict(self, files, file_doc):
+        file_doc["file_id"] = file_doc["object_id"]
         did = file_doc["file_id"]
         if did not in files:
             files[did] = file_doc
@@ -1732,6 +1737,7 @@ class GraphIndexBuilder:
             # Recurse through all keys in dictionary
             for doc_key in list(doc.keys()):
                 if doc_key not in mapping["properties"]:
+                    # pass
                     self._error(
                         "Key not in mapping",
                         "Key '{}' was not found in mapping keys {}".format(
@@ -1939,9 +1945,9 @@ class GraphIndexBuilder:
     def _is_node_indexed(self, node):
         """Return false if the node is not supposed to be indexed."""
         # Is the node allowed to be displayed publicly
-        if not self._is_node_public(node):
-            self._cache_skipped_node([node, node._props.get("state")], "not-public")
-            return False
+        # if not self._is_node_public(node):
+        #     self._cache_skipped_node([node, node._props.get("state")], "not-public")
+        #     return False
 
         if self._is_unindexed_case(node):
             self._cache_skipped_node(node, "unindexed-case")
@@ -1958,9 +1964,9 @@ class GraphIndexBuilder:
             return False
 
         # Check for omitted_projects
-        if self._is_omitted_project_or_neighbor_case(node):
-            self._cache_skipped_node(node, "omitted-project")
-            return False
+        # if self._is_omitted_project_or_neighbor_case(node):
+        #     self._cache_skipped_node(node, "omitted-project")
+        #     return False
 
         return True
 
@@ -2116,20 +2122,21 @@ class GraphIndexBuilder:
         # these edges' labels are needed later in:
         # - _add_related_files
         # - _add_archives
-        labeled_edges = frozenset((md.FileMemberOfArchive, md.FileRelatedToFile))
+        # labeled_edges = frozenset((md.FileMemberOfArchive, md.FileRelatedToFile))
 
         for edge in self._load_edges():
-            if isinstance(edge, md.FileDataFromFile):
-                # for files that are "data_from" other files, the centers and aliquots
-                # of the source files count as neighbors of the dst files.
-                for additional_neighbor in itertools.chain(
-                    edge.src.centers, edge.src.aliquots
-                ):
-                    self.G.add_edge(edge.dst, additional_neighbor)
-            elif type(edge) in labeled_edges:
-                self.G.add_edge(edge.src, edge.dst, label=edge.label)
-            else:
-                self.G.add_edge(edge.src, edge.dst)
+            # if isinstance(edge, md.FileDataFromCoreMetadataCollection):
+            #     # for files that are "data_from" other files, the centers and aliquots
+            #     # of the source files count as neighbors of the dst files.
+            #     for additional_neighbor in itertools.chain(
+            #         edge.src.centers, edge.src.aliquots
+            #     ):
+            #         self.G.add_edge(edge.dst, additional_neighbor)
+            # elif type(edge) in labeled_edges:
+            #     self.G.add_edge(edge.src, edge.dst, label=edge.label)
+            # else:
+            #     self.G.add_edge(edge.src, edge.dst)
+            self.G.add_edge(edge.src, edge.dst, label=edge.label)
 
         # Prune graph
         log.info("Cached %s nodes", self.G.number_of_nodes())
