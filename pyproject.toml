@@ -26,11 +26,11 @@ dependencies = [
   "SQLAlchemy",
   "psqlgraph @ git+https://github.com/NCI-GDC/psqlgraph.git@develop",
   "gdcdictionary @ git+https://github.com/uc-cdis/mmrf_dictionary.git@master",
-  "gdcdatamodel2 @ git+https://github.com/uc-cdis/mmrfdatamodel2.git@mmrf",
+  "gdcdatamodel2 @ git+https://github.com/theMMRF/mmrfdatamodel2.git@mmrf",
   "gdc-ng-models @ git+https://github.com/NCI-GDC/gdc-ng-models.git@develop",
   "indexclient @ git+https://github.com/NCI-GDC/indexclient.git@develop",
   "queueclient @ git+https://github.com/NCI-GDC/queueclient.git#develop",
-  "gdcmodels @ git+https://github.com/uc-cdis/mmrf-models.git#mmrf"
+  "gdcmodels @ git+https://github.com/theMMRF/mmrf-models.git#mmrf"
 ]
 description = "Repository for building the GDC Elasticsearch indices."
 dynamic = ["version"]
