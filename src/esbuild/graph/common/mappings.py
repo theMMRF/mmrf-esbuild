@@ -59,6 +59,7 @@ CASE_TREE = {
     "case": {
         "corr": (ONE_TO_MANY, "cases"),
         "bone_assessment": {"corr": (ONE_TO_MANY, "bone_assessments")},
+        "cgs_risk_key_criteria": {"corr": (ONE_TO_ONE, "cgs_risk_key_criteria")},
         "administered_regimen_line": {"corr": (ONE_TO_MANY, "administered_regimen_lines")},
         "outcomes":  {"corr": (ONE_TO_MANY, "outcomes")},
         "annotation": {"corr": (ONE_TO_MANY, "annotations")},
