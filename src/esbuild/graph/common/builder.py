@@ -39,6 +39,7 @@ AVAILABLE_GENCODE_VERSIONS = frozenset(["neutral", "v22", "v36"])
 FILE_MISSING_GENCODE = {"error": "no gencode_version for generated data files"}
 ENTRY_FOR_WRONG_GENCODE = {"ignore": "wrong gencode_version for generated data files"}
 FIELD_ALLOWLIST = frozenset({"wgs_coverage", "specimen_type"})
+UNAVAILABLE_FILE_SUFFIX = ".this_file_is_unavailable.txt"
 
 BIOSPECIMEN_TYPES = frozenset(
     {
@@ -555,6 +556,21 @@ class GraphIndexBuilder:
     def _remove_bam_index_files(self, files):
         return {f for f in files if not self._is_index_file(f)}
 
+    def _remove_unavailable_files(self, files: Iterable[Node]) -> set[Node]:
+        """Exclude placeholder files without removing them from the graph.
+
+        The placeholder nodes are needed to preserve paths to downstream analysis
+        files, so they must only be filtered from documents emitted to Elasticsearch.
+        """
+        return {
+            file_
+            for file_ in files
+            if not (
+                isinstance(file_name := getattr(file_, "file_name", None), str)
+                and file_name.endswith(UNAVAILABLE_FILE_SUFFIX)
+            )
+        }
+
     ###################################################################
     #                          Cases
     ##################################################################
@@ -579,6 +595,7 @@ class GraphIndexBuilder:
 
         files = self._remove_bam_index_files(files)
         files = self._remove_hidden_nodes(files)
+        files = self._remove_unavailable_files(files)
 
         return files
 
@@ -1370,6 +1387,7 @@ class GraphIndexBuilder:
 
         # filter files
         files = {f for f in files if not validators.is_node_hidden(f)}
+        files = self._remove_unavailable_files(files)
 
         log.info(f"Got {len(files)} files from {len(case_files)} cases")
 
