@@ -1,5 +1,7 @@
 import argparse
 import logging
+import time
+from datetime import timedelta
 
 import elasticsearch
 import psqlgraph
@@ -7,9 +9,6 @@ from indexclient import client
 
 from esbuild import gdc_elasticsearch, utils
 from esbuild.graph.active import builder
-
-import time
-from datetime import timedelta
 
 """ENVIRONMENT VARS REQUIRED:
 # Postgres connection
@@ -42,9 +41,11 @@ INDEXD_HOST
 
 # logging.getLogger().addFilter(DebugFilter())
 
+
 class SuppressPackageFilter(logging.Filter):
     def filter(self, record):
         return not record.pathname.endswith("indexclient/client.py")
+
 
 logging.getLogger().addFilter(SuppressPackageFilter())
 
@@ -68,7 +69,7 @@ def get_gdc_elasticsearch(
         indexd_client: Indexd Client
         pg_driver: psql graph driver
         es_client: elasticsearch client
-        payload: job payload
+        args: Parsed command-line arguments
         save_doc_path: Where to save docs (if necessary)
         skip_es: Skips writing to es
 
@@ -136,8 +137,9 @@ def main() -> None:
         )
         end_time = time.monotonic()
         print("Runtime: ", timedelta(seconds=end_time - start_time))
-    except:
+    except Exception:
         logger.critical("Minion failed.", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":

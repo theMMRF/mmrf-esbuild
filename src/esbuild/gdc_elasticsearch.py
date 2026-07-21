@@ -382,6 +382,7 @@ class GDCElasticsearch:
             event["alert_type"] = "error"
             extra_tags = ["status:failed"]
             self.save_docs(cases, files, annotations, projects)
+            raise
         finally:
             self.event_logger(
                 "ESBuild finished", tags=["stage:finished", *extra_tags], **event

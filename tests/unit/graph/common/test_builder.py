@@ -4,6 +4,8 @@ from unittest import mock
 
 import more_itertools
 import psqlgraph
+import pytest
+import requests
 from indexclient import client
 
 from esbuild.graph.common import builder
@@ -44,6 +46,64 @@ def test__denormalize_annotations__no_annotations() -> None:
     _, _, result, _ = index_builder.denormalize_all()
 
     assert result == []
+
+
+def make_http_error(status_code: int) -> requests.HTTPError:
+    response = requests.Response()
+    response.status_code = status_code
+    response.url = "https://indexd.example/index/dg.MMRF/test-object"
+    return requests.HTTPError(f"HTTP {status_code}", response=response)
+
+
+def test__get_indexd_record__retries_transient_http_error() -> None:
+    indexd = mock.MagicMock()
+    record = mock.Mock()
+    indexd.get.side_effect = [make_http_error(502), record]
+    index_builder = DummyIndexBuilder(mock.MagicMock(), indexd)
+
+    with mock.patch.object(builder.time, "sleep") as sleep:
+        result = index_builder._get_indexd_record("test-object")
+
+    assert result is record
+    assert indexd.get.call_args_list == [mock.call("test-object"), mock.call("test-object")]
+    sleep.assert_called_once_with(builder.INDEXD_RETRY_BACKOFF_SECONDS)
+
+
+def test__get_indexd_record__raises_non_retryable_http_error() -> None:
+    indexd = mock.MagicMock()
+    error = make_http_error(400)
+    indexd.get.side_effect = error
+    index_builder = DummyIndexBuilder(mock.MagicMock(), indexd)
+
+    with (
+        mock.patch.object(builder.time, "sleep") as sleep,
+        pytest.raises(requests.HTTPError) as raised,
+    ):
+        index_builder._get_indexd_record("test-object")
+
+    assert raised.value is error
+    indexd.get.assert_called_once_with("test-object")
+    sleep.assert_not_called()
+
+
+def test__get_indexd_record__raises_after_retry_limit() -> None:
+    indexd = mock.MagicMock()
+    error = make_http_error(502)
+    indexd.get.side_effect = error
+    index_builder = DummyIndexBuilder(mock.MagicMock(), indexd)
+
+    with (
+        mock.patch.object(builder.time, "sleep") as sleep,
+        pytest.raises(requests.HTTPError) as raised,
+    ):
+        index_builder._get_indexd_record("test-object")
+
+    assert raised.value is error
+    assert indexd.get.call_count == builder.INDEXD_REQUEST_MAX_ATTEMPTS
+    assert sleep.call_args_list == [
+        mock.call(builder.INDEXD_RETRY_BACKOFF_SECONDS * 2**attempt)
+        for attempt in range(builder.INDEXD_REQUEST_MAX_ATTEMPTS - 1)
+    ]
 
 
 def test__remove_unavailable_files__matches_only_placeholder_suffix() -> None:
