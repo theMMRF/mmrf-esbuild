@@ -6,8 +6,8 @@ source .venv/bin/activate
 
 pip install --no-build-isolation --editable .
 
-RANDOM_SUFFIX=$(printf '%04x' "$RANDOM")
-PREFIX="ia-$(date +%Y%m%d-%H%M%S)-${RANDOM_SUFFIX}"
+RUN_ID=$(python -c 'import uuid; print(uuid.uuid4().hex)')
+PREFIX="ia-$(date +%Y%m%d-%H%M%S)-${RUN_ID}"
 LOG_DIR="${HOME}/logs/mmrf-esbuild"
 LOG_FILE="${LOG_DIR}/${PREFIX}.log"
 
@@ -21,6 +21,6 @@ else
   status=$?
   echo "ES build failed with exit code $status: $PREFIX" >&2
   echo "See $LOG_FILE for details" >&2
-  tail -n 50 "$LOG_FILE" >&2
+  tail -n 50 "$LOG_FILE" >&2 || true
   exit "$status"
 fi

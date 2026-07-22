@@ -70,8 +70,6 @@ def get_gdc_elasticsearch(
         pg_driver: psql graph driver
         es_client: elasticsearch client
         args: Parsed command-line arguments
-        save_doc_path: Where to save docs (if necessary)
-        skip_es: Skips writing to es
 
     Returns:
         GDCElasticsearch

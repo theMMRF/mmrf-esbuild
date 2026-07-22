@@ -381,7 +381,13 @@ class GDCElasticsearch:
             event["text"] = f"index deploy failed: {self.index_prefix}"
             event["alert_type"] = "error"
             extra_tags = ["status:failed"]
-            self.save_docs(cases, files, annotations, projects)
+            try:
+                self.save_docs(cases, files, annotations, projects)
+            except Exception:
+                logger.exception(
+                    "Unable to save failed-build documents to %s",
+                    self.doc_output_dir,
+                )
             raise
         finally:
             self.event_logger(

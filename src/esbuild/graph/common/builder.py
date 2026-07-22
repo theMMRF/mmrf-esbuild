@@ -903,7 +903,7 @@ class GraphIndexBuilder:
             return node
 
         # Try to get cached metadata value
-        record = self.file_metadata.get(node.object_id)
+        record = self.file_metadata.get(node.node_id)
 
         # If not found, get it from indexd
         if not record:
@@ -2286,10 +2286,10 @@ class GraphIndexBuilder:
             self.relevant_nodes[f] = self._walk_paths(f, paths, whole=True)
 
     def _cache_annotations(self):
-        if not self.annotations:
+        if self.annotations is None:
             # cache what nodes are annotations
             self.annotations = list(self._nodes_labeled("annotation"))
-        if self.annotation_entities:
+        if self.annotation_entities is not None:
             # we've already cached the related entities
             return
         if not self.annotations:

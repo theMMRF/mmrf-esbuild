@@ -48,6 +48,22 @@ def test__denormalize_annotations__no_annotations() -> None:
     assert result == []
 
 
+def test__cache_annotations__empty_result_is_cached() -> None:
+    index_builder = DummyIndexBuilder(mock.MagicMock(), mock.MagicMock())
+    index_builder.annotations = None
+    index_builder.annotation_entities = None
+    index_builder._nodes_labeled = mock.Mock(return_value=iter(()))
+
+    with mock.patch.object(builder.log, "warning") as warning:
+        index_builder._cache_annotations()
+        index_builder._cache_annotations()
+
+    assert index_builder.annotations == []
+    assert index_builder.annotation_entities == {}
+    index_builder._nodes_labeled.assert_called_once_with("annotation")
+    warning.assert_called_once_with("No annotations found in the cached database!")
+
+
 def make_http_error(status_code: int) -> requests.HTTPError:
     response = requests.Response()
     response.status_code = status_code
@@ -104,6 +120,32 @@ def test__get_indexd_record__raises_after_retry_limit() -> None:
         mock.call(builder.INDEXD_RETRY_BACKOFF_SECONDS * 2**attempt)
         for attempt in range(builder.INDEXD_REQUEST_MAX_ATTEMPTS - 1)
     ]
+
+
+def test__add_file_metadata_from_indexd__reuses_node_id_cache() -> None:
+    index_builder = DummyIndexBuilder(mock.MagicMock(), mock.MagicMock())
+    node = mock.MagicMock(
+        node_id="graph-node-id",
+        object_id="indexd-object-id",
+        _dictionary={"submittable": True},
+    )
+    indexd_record = mock.Mock()
+    indexd_record.to_json.return_value = {
+        "acl": [],
+        "file_name": "results.txt",
+        "file_state": "uploaded",
+        "metadata": {},
+        "urls_metadata": {},
+        "size": 100,
+        "hashes": {"md5": "test-md5"},
+    }
+    index_builder._get_indexd_record = mock.Mock(return_value=indexd_record)
+
+    index_builder._add_file_metadata_from_indexd(node)
+    index_builder._add_file_metadata_from_indexd(node)
+
+    index_builder._get_indexd_record.assert_called_once_with("indexd-object-id")
+    assert index_builder.file_metadata["graph-node-id"] == indexd_record.to_json.return_value
 
 
 def test__remove_unavailable_files__matches_only_placeholder_suffix() -> None:
