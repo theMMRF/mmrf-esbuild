@@ -25,7 +25,7 @@ dependencies = [
   "requests",
   "SQLAlchemy",
   "psqlgraph @ git+https://github.com/NCI-GDC/psqlgraph.git@develop",
-  "gdcdictionary @ git+https://github.com/uc-cdis/mmrf_dictionary.git@master",
+  "gdcdictionary @ git+https://github.com/theMMRF/mmrf_dictionary.git@master",
   "gdcdatamodel2 @ git+https://github.com/theMMRF/mmrfdatamodel2.git@mmrf",
   "gdc-ng-models @ git+https://github.com/NCI-GDC/gdc-ng-models.git@develop",
   "indexclient @ git+https://github.com/NCI-GDC/indexclient.git@develop",
