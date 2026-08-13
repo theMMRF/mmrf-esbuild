@@ -34,11 +34,11 @@ elasticsearch==7.17.12
     #   gdcmodels
 gdc-ng-models==3.2.0
     # via esbuild (pyproject.toml)
-gdcdatamodel2==3.4.4
+gdcdatamodel2 @ git+https://github.com/theMMRF/mmrfdatamodel2.git@mmrf
     # via esbuild (pyproject.toml)
-gdcdictionary==3.4.4
+gdcdictionary @ git+https://github.com/theMMRF/mmrf_dictionary.git@master
     # via esbuild (pyproject.toml)
-gdcmodels==5.11
+gdcmodels @ git+https://github.com/theMMRF/mmrf-models.git@mmrf
     # via esbuild (pyproject.toml)
 greenlet==3.2.4
     # via sqlalchemy
