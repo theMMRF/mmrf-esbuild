@@ -6,7 +6,7 @@ source .venv/bin/activate
 
 pip install --no-build-isolation --editable .
 
-RUN_ID=$(python -c 'import uuid; print(uuid.uuid4().hex)')
+RUN_ID=$(python -c 'import secrets, string; print("".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(4)))')
 PREFIX="ia-$(date +%Y%m%d-%H%M%S)-${RUN_ID}"
 LOG_DIR="${HOME}/logs/mmrf-esbuild"
 LOG_FILE="${LOG_DIR}/${PREFIX}.log"
