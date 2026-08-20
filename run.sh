@@ -1,11 +1,26 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # shellcheck source=/dev/null
 source .venv/bin/activate
 
 pip install --no-build-isolation --editable .
 
-PREFIX="ia-$(date +%Y%m%d)-$(date +%H%M%S)-$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 4)"
-echo "$PREFIX"
+RUN_ID=$(python -c 'import uuid; print(uuid.uuid4().hex)')
+PREFIX="ia-$(date +%Y%m%d-%H%M%S)-${RUN_ID}"
+LOG_DIR="${HOME}/logs/mmrf-esbuild"
+LOG_FILE="${LOG_DIR}/${PREFIX}.log"
 
-time python -u src/esbuild/bin/single.py "$PREFIX" > ~/logs/mmrf-esbuild/"$ID".log 2>&1
+mkdir -p "$LOG_DIR"
+echo "$PREFIX"
+echo "Writing build output to $LOG_FILE"
+
+if time python -u src/esbuild/bin/single.py "$PREFIX" > "$LOG_FILE" 2>&1; then
+  echo "ES build completed successfully: $PREFIX"
+else
+  status=$?
+  echo "ES build failed with exit code $status: $PREFIX" >&2
+  echo "See $LOG_FILE for details" >&2
+  tail -n 50 "$LOG_FILE" >&2 || true
+  exit "$status"
+fi

@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from functools import lru_cache
 from hashlib import md5
+from pathlib import Path
 from reprlib import repr
 from typing import ClassVar
 
@@ -452,12 +453,10 @@ class ReleaseHelper:
         if commit_hash:
             return commit_hash
 
-        git_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.realpath(__file__))), ".git"
-        )
+        repository_root = Path(__file__).resolve().parents[2]
         try:
             commit_hash = (
-                subprocess.check_output(["git", f"--git-dir={git_dir}", "rev-parse", "HEAD"])
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repository_root)
                 .decode("utf-8")
                 .strip()
             )

@@ -9,6 +9,7 @@ import hashlib
 import itertools
 import logging
 import re
+import time
 import traceback
 import uuid
 from collections import defaultdict
@@ -22,6 +23,7 @@ from uuid import UUID, uuid5
 import more_itertools
 import networkx as nx
 import psqlgraph
+import requests
 from datadog import statsd
 from gdcdatamodel2 import models as md
 from indexclient import client
@@ -39,6 +41,9 @@ AVAILABLE_GENCODE_VERSIONS = frozenset(["neutral", "v22", "v36"])
 FILE_MISSING_GENCODE = {"error": "no gencode_version for generated data files"}
 ENTRY_FOR_WRONG_GENCODE = {"ignore": "wrong gencode_version for generated data files"}
 FIELD_ALLOWLIST = frozenset({"wgs_coverage", "specimen_type"})
+UNAVAILABLE_FILE_SUFFIX = ".this_file_is_unavailable.txt"
+INDEXD_REQUEST_MAX_ATTEMPTS = 5
+INDEXD_RETRY_BACKOFF_SECONDS = 5
 
 BIOSPECIMEN_TYPES = frozenset(
     {
@@ -555,6 +560,21 @@ class GraphIndexBuilder:
     def _remove_bam_index_files(self, files):
         return {f for f in files if not self._is_index_file(f)}
 
+    def _remove_unavailable_files(self, files: Iterable[Node]) -> set[Node]:
+        """Exclude placeholder files without removing them from the graph.
+
+        The placeholder nodes are needed to preserve paths to downstream analysis
+        files, so they must only be filtered from documents emitted to Elasticsearch.
+        """
+        return {
+            file_
+            for file_ in files
+            if not (
+                isinstance(file_name := getattr(file_, "file_name", None), str)
+                and file_name.endswith(UNAVAILABLE_FILE_SUFFIX)
+            )
+        }
+
     ###################################################################
     #                          Cases
     ##################################################################
@@ -579,6 +599,7 @@ class GraphIndexBuilder:
 
         files = self._remove_bam_index_files(files)
         files = self._remove_hidden_nodes(files)
+        files = self._remove_unavailable_files(files)
 
         return files
 
@@ -846,6 +867,34 @@ class GraphIndexBuilder:
 
         return gencode_version in self.allowed_gencode_versions
 
+    def _get_indexd_record(self, object_id: str) -> client.Document | None:
+        """Fetch an IndexD record, retrying transient request failures."""
+        for attempt in range(1, INDEXD_REQUEST_MAX_ATTEMPTS + 1):
+            try:
+                return self.indexd.get(object_id)
+            except requests.RequestException as exception:
+                response = exception.response
+                status_code = response.status_code if response is not None else None
+                retryable = status_code is None or status_code == 429 or status_code >= 500
+
+                if not retryable or attempt == INDEXD_REQUEST_MAX_ATTEMPTS:
+                    raise
+
+                retry_delay = INDEXD_RETRY_BACKOFF_SECONDS * 2 ** (attempt - 1)
+                log.warning(
+                    "IndexD request for %s failed%s; retrying in %d seconds "
+                    "(attempt %d/%d): %s",
+                    object_id,
+                    f" with HTTP {status_code}" if status_code is not None else "",
+                    retry_delay,
+                    attempt,
+                    INDEXD_REQUEST_MAX_ATTEMPTS,
+                    exception,
+                )
+                time.sleep(retry_delay)
+
+        raise AssertionError("IndexD retry loop exited unexpectedly")
+
     def _add_file_metadata_from_indexd(self, node: Node) -> Node:
         """Read file metadata from indexd and sets it to node."""
         if node.node_id in self.versioned_files:
@@ -854,12 +903,12 @@ class GraphIndexBuilder:
             return node
 
         # Try to get cached metadata value
-        record = self.file_metadata.get(node.object_id)
+        record = self.file_metadata.get(node.node_id)
 
         # If not found, get it from indexd
         if not record:
             # record = self.indexd.get(node.node_id)
-            record = self.indexd.get(node.object_id)
+            record = self._get_indexd_record(node.object_id)
 
             if not record:
                 if node.sysan.get("to_delete"):
@@ -1370,6 +1419,7 @@ class GraphIndexBuilder:
 
         # filter files
         files = {f for f in files if not validators.is_node_hidden(f)}
+        files = self._remove_unavailable_files(files)
 
         log.info(f"Got {len(files)} files from {len(case_files)} cases")
 
@@ -2236,10 +2286,10 @@ class GraphIndexBuilder:
             self.relevant_nodes[f] = self._walk_paths(f, paths, whole=True)
 
     def _cache_annotations(self):
-        if not self.annotations:
+        if self.annotations is None:
             # cache what nodes are annotations
             self.annotations = list(self._nodes_labeled("annotation"))
-        if self.annotation_entities:
+        if self.annotation_entities is not None:
             # we've already cached the related entities
             return
         if not self.annotations:

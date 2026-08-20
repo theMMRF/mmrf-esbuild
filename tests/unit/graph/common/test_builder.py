@@ -4,6 +4,8 @@ from unittest import mock
 
 import more_itertools
 import psqlgraph
+import pytest
+import requests
 from indexclient import client
 
 from esbuild.graph.common import builder
@@ -44,6 +46,194 @@ def test__denormalize_annotations__no_annotations() -> None:
     _, _, result, _ = index_builder.denormalize_all()
 
     assert result == []
+
+
+def test__cache_annotations__empty_result_is_cached() -> None:
+    index_builder = DummyIndexBuilder(mock.MagicMock(), mock.MagicMock())
+    index_builder.annotations = None
+    index_builder.annotation_entities = None
+    index_builder._nodes_labeled = mock.Mock(return_value=iter(()))
+
+    with mock.patch.object(builder.log, "warning") as warning:
+        index_builder._cache_annotations()
+        index_builder._cache_annotations()
+
+    assert index_builder.annotations == []
+    assert index_builder.annotation_entities == {}
+    index_builder._nodes_labeled.assert_called_once_with("annotation")
+    warning.assert_called_once_with("No annotations found in the cached database!")
+
+
+def make_http_error(status_code: int) -> requests.HTTPError:
+    response = requests.Response()
+    response.status_code = status_code
+    response.url = "https://indexd.example/index/dg.MMRF/test-object"
+    return requests.HTTPError(f"HTTP {status_code}", response=response)
+
+
+def test__get_indexd_record__retries_transient_http_error() -> None:
+    indexd = mock.MagicMock()
+    record = mock.Mock()
+    indexd.get.side_effect = [make_http_error(502), record]
+    index_builder = DummyIndexBuilder(mock.MagicMock(), indexd)
+
+    with mock.patch.object(builder.time, "sleep") as sleep:
+        result = index_builder._get_indexd_record("test-object")
+
+    assert result is record
+    assert indexd.get.call_args_list == [mock.call("test-object"), mock.call("test-object")]
+    sleep.assert_called_once_with(builder.INDEXD_RETRY_BACKOFF_SECONDS)
+
+
+def test__get_indexd_record__raises_non_retryable_http_error() -> None:
+    indexd = mock.MagicMock()
+    error = make_http_error(400)
+    indexd.get.side_effect = error
+    index_builder = DummyIndexBuilder(mock.MagicMock(), indexd)
+
+    with (
+        mock.patch.object(builder.time, "sleep") as sleep,
+        pytest.raises(requests.HTTPError) as raised,
+    ):
+        index_builder._get_indexd_record("test-object")
+
+    assert raised.value is error
+    indexd.get.assert_called_once_with("test-object")
+    sleep.assert_not_called()
+
+
+def test__get_indexd_record__raises_after_retry_limit() -> None:
+    indexd = mock.MagicMock()
+    error = make_http_error(502)
+    indexd.get.side_effect = error
+    index_builder = DummyIndexBuilder(mock.MagicMock(), indexd)
+
+    with (
+        mock.patch.object(builder.time, "sleep") as sleep,
+        pytest.raises(requests.HTTPError) as raised,
+    ):
+        index_builder._get_indexd_record("test-object")
+
+    assert raised.value is error
+    assert indexd.get.call_count == builder.INDEXD_REQUEST_MAX_ATTEMPTS
+    assert sleep.call_args_list == [
+        mock.call(builder.INDEXD_RETRY_BACKOFF_SECONDS * 2**attempt)
+        for attempt in range(builder.INDEXD_REQUEST_MAX_ATTEMPTS - 1)
+    ]
+
+
+def test__add_file_metadata_from_indexd__reuses_node_id_cache() -> None:
+    index_builder = DummyIndexBuilder(mock.MagicMock(), mock.MagicMock())
+    node = mock.MagicMock(
+        node_id="graph-node-id",
+        object_id="indexd-object-id",
+        _dictionary={"submittable": True},
+    )
+    indexd_record = mock.Mock()
+    indexd_record.to_json.return_value = {
+        "acl": [],
+        "file_name": "results.txt",
+        "file_state": "uploaded",
+        "metadata": {},
+        "urls_metadata": {},
+        "size": 100,
+        "hashes": {"md5": "test-md5"},
+    }
+    index_builder._get_indexd_record = mock.Mock(return_value=indexd_record)
+
+    index_builder._add_file_metadata_from_indexd(node)
+    index_builder._add_file_metadata_from_indexd(node)
+
+    index_builder._get_indexd_record.assert_called_once_with("indexd-object-id")
+    assert index_builder.file_metadata["graph-node-id"] == indexd_record.to_json.return_value
+
+
+def test__remove_unavailable_files__matches_only_placeholder_suffix() -> None:
+    index_builder = DummyIndexBuilder(mock.MagicMock(), mock.MagicMock())
+    available = mock.Mock(file_name="MMRF_1462_4_BM_CD138pos_T2_TSMRU.txt")
+    unavailable = mock.Mock(
+        file_name="MMRF_1462_4_BM_CD138pos_T2_TSMRU.this_file_is_unavailable.txt"
+    )
+    suffix_not_at_end = mock.Mock(file_name="sample.this_file_is_unavailable.txt.checksum")
+    missing_file_name = mock.Mock(spec=[])
+
+    result = index_builder._remove_unavailable_files(
+        {available, unavailable, suffix_not_at_end, missing_file_name}
+    )
+
+    assert result == {available, suffix_not_at_end, missing_file_name}
+
+
+def test__get_case_files__excludes_unavailable_placeholders() -> None:
+    index_builder = DummyIndexBuilder(mock.MagicMock(), mock.MagicMock())
+    case = mock.Mock()
+    available = mock.Mock(file_name="results.txt")
+    unavailable = mock.Mock(file_name="input.this_file_is_unavailable.txt")
+    index_builder._walk_paths = mock.Mock(return_value={available, unavailable})
+    index_builder._add_file_metadata_from_indexd = mock.Mock(side_effect=lambda file_: file_)
+    index_builder._remove_bam_index_files = mock.Mock(side_effect=set)
+    index_builder._remove_hidden_nodes = mock.Mock(side_effect=set)
+
+    result = index_builder._get_case_files(case)
+
+    assert result == {available}
+
+
+def test__denormalize_project__excludes_unavailable_files_from_summary() -> None:
+    index_builder = DummyIndexBuilder(mock.MagicMock(), mock.MagicMock())
+    project = mock.Mock()
+    program = mock.Mock()
+    case = mock.MagicMock()
+    case.__getitem__.side_effect = {
+        "disease_type": "Multiple Myeloma",
+        "primary_site": "Bone Marrow",
+    }.__getitem__
+    available = mock.MagicMock(file_name="results.txt")
+    available.__getitem__.side_effect = {"file_size": 100}.__getitem__
+    unavailable = mock.MagicMock(file_name="input.this_file_is_unavailable.txt")
+    unavailable.__getitem__.side_effect = {"file_size": 25}.__getitem__
+
+    def get_neighbors(node, label):
+        if node is project and label == "program":
+            return iter((program,))
+        if node is project and label == "case":
+            return iter((case,))
+        raise AssertionError(f"Unexpected neighbor lookup: {node}, {label}")
+
+    index_builder._get_base_doc = mock.Mock(
+        side_effect=lambda node: (
+            {"project_id": "MMRF-PROJECT"} if node is project else {"name": "MMRF"}
+        )
+    )
+    index_builder._neighbors_labeled = mock.Mock(side_effect=get_neighbors)
+    index_builder._walk_paths = mock.Mock(return_value={available, unavailable})
+    index_builder._remove_bam_index_files = mock.Mock(side_effect=set)
+    index_builder._patch_project = mock.Mock()
+    index_builder.experimental_strategies = {"RNA-Seq": {available, unavailable}}
+    index_builder.data_categories = {"Transcriptome Profiling": {available, unavailable}}
+
+    with mock.patch.object(builder.validators, "is_node_hidden", return_value=False):
+        result = index_builder._denormalize_project(project)
+
+    assert result["summary"] == {
+        "case_count": 1,
+        "file_count": 1,
+        "file_size": 100,
+        "experimental_strategies": [
+            {
+                "case_count": 1,
+                "experimental_strategy": "RNA-Seq",
+                "file_count": 1,
+            }
+        ],
+        "data_categories": [
+            {
+                "case_count": 1,
+                "data_category": "Transcriptome Profiling",
+                "file_count": 1,
+            }
+        ],
+    }
 
 
 def test__denormalize_annotations__annotated_case_node() -> None:
