@@ -117,7 +117,7 @@ def summary_groups(files, manifest):
     ]
 
 
-def prepare_sources(documents, manifest, file_documents):
+def iter_prepare_sources(documents, manifest, file_documents):
     """Keep cases public; attach ownership to every file and scoped summary group.
 
     file_documents must contain the complete served file projection so embedded
@@ -182,7 +182,11 @@ def prepare_sources(documents, manifest, file_documents):
                     )
         return result
 
-    return [enrich(annotate(document, policies)) for document in documents]
+    return (enrich(annotate(document, policies)) for document in documents)
+
+
+def prepare_sources(documents, manifest, file_documents):
+    return list(iter_prepare_sources(documents, manifest, file_documents))
 
 
 def annotate(document, manifest):
@@ -305,8 +309,12 @@ def ownership_mapping(documents):
 
 def merge_ownership_mapping(mapping, documents):
     """Prepare a fresh index mapping without parent copies of private metadata."""
+    return merge_ownership_additions(mapping, ownership_mapping(documents))
+
+
+def merge_ownership_additions(mapping, additions):
+    """Merge validated ownership layout into a fresh index mapping."""
     result = deepcopy(mapping)
-    additions = ownership_mapping(documents)
 
     def merge(target, extra):
         for name, definition in extra.items():
