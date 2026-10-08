@@ -257,3 +257,34 @@ and
 Read how to
 contribute
 [here](https://github.com/NCI-GDC/esbuild/blob/develop/CONTRIBUTING.md).
+
+
+## Opt-in project file metadata ownership
+
+Set `PROJECT_VISIBILITY_ENABLED=true` only for a complete build into fresh index
+names. The default is false and retains existing builder behavior. The feature
+uses authenticated IndexD lookup results already cached by the builder to attach
+canonical `_gen3_file_authz` ownership to root and embedded files. Graph `file_id`
+and IndexD `object_id` can differ; their ownership comes from the same trusted
+lookup, not the case's graph project. Mixed public cases retain their clinical
+metadata while file children receive independent ownership. The builder also
+prepares contribution groups for safe case/project file counts.
+
+Preparation validates all ownership and summaries before any index is changed.
+The initial implementation rejects partial-project and versioned builds when
+opted in, and rejects existing destination indices before cleanup. Use a new
+prefix and review/switch served aliases through the normal operator process.
+Existing object mappings cannot become nested in place. Fresh mappings preserve
+field definitions while adding ownership fields, making owned embedded objects
+nested and removing their parent copies. Build output adds no policy grants.
+
+Query services must support the matching contract. Changing user visibility
+later requires only usersync; ingestion or a change in file ownership requires a
+fresh projection build. Other genomic builders need the offline preparation step
+in the GitOps runbook; this repository builds the graph-derived case/file/project
+and annotation projections only. Keep private files out of other stores until
+those stores enforce the same ownership.
+
+Run isolated transformation/mapping tests without the graph model stack:
+`PYTHONPATH=src python -m unittest discover -s tests -p test_project_file_visibility.py -v`.
+Full graph build/integration acceptance remains required before dev rollout.
