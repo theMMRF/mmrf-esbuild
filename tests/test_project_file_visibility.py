@@ -122,6 +122,10 @@ class ProjectVisibilityTests(unittest.TestCase):
         )
         self.assertEqual(mapping["properties"]["files"]["type"], "object")
 
+    def test_unknown_mutation_source_file_reference_is_rejected(self):
+        with self.assertRaises(ValueError):
+            prepare_sources([{"src_file_id": "missing"}], {"records": []}, [])
+
     def test_missing_manifest_ownership_fails(self):
         for manifest in ([{"did": "rna", "authz": []}], [{"did": "rna", "authz": [A]}]):
             with self.assertRaises(ValueError):
