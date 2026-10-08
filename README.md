@@ -288,3 +288,10 @@ those stores enforce the same ownership.
 Run isolated transformation/mapping tests without the graph model stack:
 `PYTHONPATH=src python -m unittest discover -s tests -p test_project_file_visibility.py -v`.
 Full graph build/integration acceptance remains required before dev rollout.
+
+Opted-in default builders require `INDEXD_USERNAME` and `INDEXD_PASSWORD` from
+server secrets. The prior anonymous client cannot export complete ownership once
+IndexD enforcement is enabled. The builder pins the MMRF client revision that
+forwards Basic credentials on GET, using its existing standard IndexD interface.
+Default opt-out builders retain their anonymous authentication tuple. Test the
+full graph build with this pinned client before rollout.

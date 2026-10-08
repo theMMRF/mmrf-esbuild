@@ -1,5 +1,6 @@
 import unittest
 from esbuild.project_file_visibility import (
+    indexd_read_auth,
     prepare_build,
     merge_ownership_mapping,
     annotate,
@@ -33,6 +34,16 @@ FILES = [
 
 
 class ProjectVisibilityTests(unittest.TestCase):
+    def test_opt_in_requires_trusted_indexd_credentials(self):
+        self.assertEqual(indexd_read_auth(False, None, None), (None, None))
+        self.assertEqual(
+            indexd_read_auth(True, "service", "test-password"),
+            ("service", "test-password"),
+        )
+        for username, password in ((None, None), ("service", ""), ("", "password")):
+            with self.assertRaises(ValueError):
+                indexd_read_auth(True, username, password)
+
     def test_shared_case_is_not_hidden_as_a_whole(self):
         case = {
             "case_id": "c1",
@@ -170,10 +181,6 @@ class ProjectVisibilityTests(unittest.TestCase):
         self.assertFalse(properties[SUMMARY]["enabled"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class BuilderIntegrationTests(unittest.TestCase):
     """Exercise real builder entry points while replacing graph/ES dependencies."""
 
@@ -281,12 +288,17 @@ class BuilderIntegrationTests(unittest.TestCase):
                 save_doc_path=directory,
             )
             build._cache_versioned_files = lambda: {}
-            build._cache_database = lambda converter: ([], [], [], [])
+            build._cache_database = MagicMock(return_value=([], [], [], []))
             build.log_skipped_nodes = MagicMock()
             build._prepare_indices = MagicMock()
             build.deploy = MagicMock()
             build.es.indices.exists.return_value = True
             with self.assertRaisesRegex(ValueError, "fresh index"):
                 build.go(roll_alias=False, send_events=False)
+            build._cache_database.assert_not_called()
             build._prepare_indices.assert_not_called()
             build.deploy.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

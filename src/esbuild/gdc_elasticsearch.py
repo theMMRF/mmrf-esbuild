@@ -348,6 +348,13 @@ class GDCElasticsearch:
         if roll_alias and not self.index_aliases:
             raise ValueError("'index_alias_prefix' is required")
 
+        if self.project_visibility_enabled and self.es and not self.skip_es:
+            for index_name in self.index_names.values():
+                if self.es.indices.exists(index=index_name):
+                    raise ValueError(
+                        "Project visibility requires fresh index names; existing indices cannot be safely converted in place"
+                    )
+
         if send_events:
             self.event_logger = get_statsd_event_logger(
                 self.index_prefix, self.build_projects
@@ -385,12 +392,6 @@ class GDCElasticsearch:
             self._dump_locally(cases, files, annotations, projects)
             return
 
-        if self.project_visibility_enabled:
-            for index_name in self.index_names.values():
-                if self.es.indices.exists(index=index_name):
-                    raise ValueError(
-                        "Project visibility requires fresh index names; existing indices cannot be safely converted in place"
-                    )
         self._prepare_indices()
 
         logger.info("Deploying new ES index with new docs")

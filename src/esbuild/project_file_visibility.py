@@ -355,3 +355,19 @@ def prepare_build(cases, files, annotations, projects, cached_records):
         prepare_sources(documents, manifest, files)
         for documents in (cases, files, annotations, projects)
     )
+
+
+def indexd_read_auth(enabled, username, password):
+    """Require trusted credentials for complete ownership reads when opted in."""
+    if not enabled:
+        return (None, None)
+    if (
+        not isinstance(username, str)
+        or not username
+        or not isinstance(password, str)
+        or not password
+    ):
+        raise ValueError(
+            "PROJECT_VISIBILITY_ENABLED requires INDEXD_USERNAME and INDEXD_PASSWORD for complete IndexD reads"
+        )
+    return username, password
