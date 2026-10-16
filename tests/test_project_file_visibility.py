@@ -126,6 +126,16 @@ class ProjectVisibilityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prepare_sources([{"src_file_id": "missing"}], {"records": []}, [])
 
+    def test_null_cases_and_project_are_optional_without_losing_ownership(self):
+        file = dict(FILES[0], cases=None)
+        prepared = prepare_sources([file], MANIFEST, [file])[0]
+        self.assertEqual(prepared[AUTHZ], [A])
+        file["cases"] = [{"case_id": "c1", "project": None}]
+        prepared = prepare_sources(
+            [{"case_id": "c1", "summary": {"file_count": 1}}], MANIFEST, [file]
+        )[0]
+        self.assertEqual(prepared[SUMMARY][0]["file_count"], 1)
+
     def test_missing_manifest_ownership_fails(self):
         for manifest in ([{"did": "rna", "authz": []}], [{"did": "rna", "authz": [A]}]):
             with self.assertRaises(ValueError):
@@ -302,6 +312,90 @@ class BuilderIntegrationTests(unittest.TestCase):
             build._cache_database.assert_not_called()
             build._prepare_indices.assert_not_called()
             build.deploy.assert_not_called()
+
+    def test_late_destination_conflict_never_cleans_or_reuses_another_build(self):
+        import tempfile
+        from unittest.mock import MagicMock, patch
+
+        klass = self.builder_class()
+        with tempfile.TemporaryDirectory() as directory:
+            for flag in ("false", "true"):
+                with (
+                    self.subTest(flag=flag),
+                    patch.dict("os.environ", {"PROJECT_VISIBILITY_ENABLED": flag}),
+                ):
+                    instance = klass(
+                        MagicMock(),
+                        MagicMock(),
+                        es=MagicMock(),
+                        pg_driver=MagicMock(),
+                        index_prefix="race",
+                        save_doc_path=directory,
+                    )
+                    instance.es.indices.exists.return_value = True
+                    instance.release_helper = MagicMock()
+                    instance._prepare_indices()
+                    if flag == "true":
+                        instance.release_helper.delete_docs_from_index.assert_not_called()
+                        instance.es.indices.create.side_effect = RuntimeError(
+                            "already exists"
+                        )
+                        with self.assertRaisesRegex(RuntimeError, "already exists"):
+                            instance._create_index("race_case", {}, {})
+                        instance.es.indices.create.assert_called_once()
+                        instance.es.indices.refresh.assert_not_called()
+                    else:
+                        instance.release_helper.delete_docs_from_index.assert_called()
+                        instance._create_index("race_case", {}, {})
+                        instance.es.indices.create.assert_not_called()
+
+
+class SingleRunnerTests(unittest.TestCase):
+    def test_normal_runner_uses_complete_build_only_when_opted_in(self):
+        import ast
+        import __future__
+        import os
+        from pathlib import Path
+        import types
+        from unittest.mock import MagicMock, patch
+
+        filename = Path(__file__).resolve().parents[1] / "src/esbuild/bin/single.py"
+        tree = ast.parse(filename.read_text())
+        fn = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "get_gdc_elasticsearch"
+        )
+        constructor = MagicMock()
+        namespace = {
+            "os": os,
+            "gdc_elasticsearch": types.SimpleNamespace(GDCElasticsearch=constructor),
+            "builder": types.SimpleNamespace(ActiveGraphIndexBuilder=object),
+        }
+        exec(
+            compile(
+                ast.Module(body=[fn], type_ignores=[]),
+                str(filename),
+                "exec",
+                flags=__future__.annotations.compiler_flag,
+            ),
+            namespace,
+        )
+        for flag in ("false", "true"):
+            with (
+                self.subTest(flag=flag),
+                patch.dict(os.environ, {"PROJECT_VISIBILITY_ENABLED": flag}),
+            ):
+                namespace["get_gdc_elasticsearch"](
+                    object(), object(), object(), types.SimpleNamespace(index="fresh")
+                )
+                kwargs = constructor.call_args.kwargs
+                if flag == "true":
+                    self.assertIsNone(kwargs["build_projects"])
+                else:
+                    self.assertIn("MMRF-COMMPASS-IA24", kwargs["build_projects"])
+                self.assertFalse(kwargs["cache_versioned"])
+                self.assertEqual(kwargs["index_prefix"], "fresh")
 
 
 if __name__ == "__main__":

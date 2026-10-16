@@ -295,3 +295,10 @@ IndexD enforcement is enabled. The builder pins the MMRF client revision that
 forwards Basic credentials on GET, using its existing standard IndexD interface.
 Default opt-out builders retain their anonymous authentication tuple. Test the
 full graph build with this pinned client before rollout.
+
+The normal `run.sh` / `single.py` launcher now selects a complete all-project
+build when visibility is enabled; its default project list remains unchanged
+when disabled. It writes fresh prefixed indices with `roll_alias=False`; alias
+promotion remains an operator action. Opted-in builds skip destination cleanup
+and claim each index atomically, so concurrent builds cannot reuse another job's
+destination.

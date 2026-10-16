@@ -321,6 +321,10 @@ class GDCElasticsearch:
             project_ids=self.build_projects,
         )
 
+        # Opted-in uploads claim fresh destinations atomically at creation.
+        # Never delete from a destination another build may have just created.
+        if self.project_visibility_enabled:
+            return
         for index_type, index_name in self.index_names.items():
             self.release_helper.delete_docs_from_index(
                 index_name,
@@ -465,7 +469,7 @@ class GDCElasticsearch:
                 f.write(json.dumps(entries, indent=2))
 
     def _create_index(self, index_name, index_settings, mappings):
-        if not self.es.indices.exists(index=index_name):
+        if self.project_visibility_enabled or not self.es.indices.exists(index=index_name):
             logger.info(f"Creating new index: '{index_name}'")
             self.es.indices.create(
                 index=index_name, settings=index_settings, mappings=mappings
