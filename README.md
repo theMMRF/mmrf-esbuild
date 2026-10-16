@@ -271,8 +271,9 @@ metadata while file children receive independent ownership. The builder also
 prepares contribution groups for safe case/project file counts.
 
 Preparation validates all ownership and summaries before any index is changed.
-The initial implementation rejects partial-project and versioned builds when
-opted in, and rejects existing destination indices before cleanup. Use a new
+An opted-in build may select projects, but must rebuild their complete served
+projection into fresh indices. Versioned builds and existing destination indices
+are rejected before cleanup. It cannot incrementally update an old index. Use a new
 prefix and review/switch served aliases through the normal operator process.
 Existing object mappings cannot become nested in place. Fresh mappings preserve
 field definitions while adding ownership fields, making owned embedded objects
@@ -296,9 +297,10 @@ forwards Basic credentials on GET, using its existing standard IndexD interface.
 Default opt-out builders retain their anonymous authentication tuple. Test the
 full graph build with this pinned client before rollout.
 
-The normal `run.sh` / `single.py` launcher now selects a complete all-project
-build when visibility is enabled; its default project list remains unchanged
-when disabled. It writes fresh prefixed indices with `roll_alias=False`; alias
+The normal `run.sh` / `single.py` launcher retains its existing project list
+whether visibility is enabled or disabled. Ownership must cover every file in
+that selected projection, not unrelated graph projects. Selective graph caching
+remains enabled. It writes fresh prefixed indices with `roll_alias=False`; alias
 promotion remains an operator action. Opted-in builds skip destination cleanup
 and claim each index atomically, so concurrent builds cannot reuse another job's
 destination.

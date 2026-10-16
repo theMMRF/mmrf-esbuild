@@ -158,9 +158,9 @@ class GDCElasticsearch:
         if configured_visibility not in ("true", "false"):
             raise ValueError("PROJECT_VISIBILITY_ENABLED must be true or false")
         self.project_visibility_enabled = configured_visibility == "true"
-        if self.project_visibility_enabled and (build_projects or cache_versioned):
+        if self.project_visibility_enabled and cache_versioned:
             raise ValueError(
-                "Project visibility preparation requires a complete unversioned build into new indices"
+                "Project visibility preparation requires an unversioned snapshot into new indices"
             )
         self.converter_class = converter_class
 
@@ -469,7 +469,9 @@ class GDCElasticsearch:
                 f.write(json.dumps(entries, indent=2))
 
     def _create_index(self, index_name, index_settings, mappings):
-        if self.project_visibility_enabled or not self.es.indices.exists(index=index_name):
+        if self.project_visibility_enabled or not self.es.indices.exists(
+            index=index_name
+        ):
             logger.info(f"Creating new index: '{index_name}'")
             self.es.indices.create(
                 index=index_name, settings=index_settings, mappings=mappings

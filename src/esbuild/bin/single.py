@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import time
 from datetime import timedelta
 
@@ -102,12 +101,8 @@ def get_gdc_elasticsearch(
         pg_driver=pg_driver,
         es=es_client,
         index_prefix=args.index,
-        # Ownership must cover every graph project in opted-in mode.
-        build_projects=(
-            None
-            if os.getenv("PROJECT_VISIBILITY_ENABLED", "false") == "true"
-            else build_projects
-        ),
+        # Visibility prepares the existing served scope; it must not broaden it.
+        build_projects=build_projects,
         build_awg=False,
         index_alias_prefix=alias,
         selective_caching=True,

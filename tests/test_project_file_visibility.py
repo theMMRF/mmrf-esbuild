@@ -284,6 +284,49 @@ class BuilderIntegrationTests(unittest.TestCase):
                     self.assertEqual(files[1][AUTHZ], [B])
                     self.assertEqual(cases[0][VERSION], 1)
 
+    def test_selected_project_snapshot_keeps_scope_and_prepares_cross_project_files(
+        self,
+    ):
+        import tempfile
+        from unittest.mock import MagicMock, patch
+
+        klass = self.builder_class()
+        case = {"case_id": "c1", "files": FILES, "summary": {"file_count": 2}}
+        converter = MagicMock()
+        converter.denormalize_all.return_value = ([case], FILES, [], [])
+        converter.file_metadata = {row["did"]: row for row in MANIFEST}
+        factory = MagicMock(return_value=converter)
+        converter.skipped_nodes = {}
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"PROJECT_VISIBILITY_ENABLED": "true"}),
+        ):
+            build = klass(
+                factory,
+                MagicMock(),
+                es=MagicMock(),
+                pg_driver=MagicMock(),
+                index_prefix="fresh",
+                build_projects=["MMRF-public"],
+                selective_caching=True,
+                save_doc_path=directory,
+            )
+            build.es.indices.exists.return_value = False
+            build.deploy = MagicMock()
+            build.go(roll_alias=False, send_events=False)
+            self.assertEqual(
+                factory.call_args.kwargs["build_projects"], ["MMRF-public"]
+            )
+            self.assertTrue(factory.call_args.kwargs["selective_caching"])
+            cases, files, _, _ = build.deploy.call_args.args
+            self.assertNotIn(AUTHZ, cases[0])
+            self.assertEqual([file[AUTHZ] for file in files], [[A], [B]])
+            self.assertEqual(cases[0][SUMMARY][1]["file_count"], 1)
+            self.assertEqual(cases[0][VERSION], 1)
+            build.release_helper.delete_docs_from_index.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "unversioned snapshot"):
+                klass(factory, MagicMock(), cache_versioned=True)
+
     def test_existing_destinations_fail_before_cleanup_or_deploy(self):
         import tempfile
         from unittest.mock import MagicMock, patch
@@ -351,7 +394,7 @@ class BuilderIntegrationTests(unittest.TestCase):
 
 
 class SingleRunnerTests(unittest.TestCase):
-    def test_normal_runner_uses_complete_build_only_when_opted_in(self):
+    def test_normal_runner_preserves_served_project_scope_when_opted_in(self):
         import ast
         import __future__
         import os
@@ -390,10 +433,12 @@ class SingleRunnerTests(unittest.TestCase):
                     object(), object(), object(), types.SimpleNamespace(index="fresh")
                 )
                 kwargs = constructor.call_args.kwargs
-                if flag == "true":
-                    self.assertIsNone(kwargs["build_projects"])
-                else:
-                    self.assertIn("MMRF-COMMPASS-IA24", kwargs["build_projects"])
+                self.assertEqual(
+                    kwargs["build_projects"],
+                    ["MMRF-COMMPASS-IA24"]
+                    + [f"MMRF-IA{release}" for release in range(11, 23)],
+                )
+                self.assertTrue(kwargs["selective_caching"])
                 self.assertFalse(kwargs["cache_versioned"])
                 self.assertEqual(kwargs["index_prefix"], "fresh")
 
