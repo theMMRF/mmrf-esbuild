@@ -21,6 +21,7 @@ from elasticsearch import helpers
 from indexclient import client
 
 from esbuild import utils
+from esbuild.project_file_visibility import prepare_build, merge_ownership_mapping
 from esbuild.graph.common import builder, mappings
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,9 @@ class TaskFactory:
         return Task(task_id, task["completed"], total, current, failures, error)
 
     def get_tasks(self, task_ids: Iterable[str]) -> Iterable[Task]:
-        updates = tuple(self._executor.submit(self.get_task, task_id) for task_id in task_ids)
+        updates = tuple(
+            self._executor.submit(self.get_task, task_id) for task_id in task_ids
+        )
 
         return tuple(update.result() for update in updates)
 
@@ -151,6 +154,14 @@ class GDCElasticsearch:
         audit: bool = True,
         **kwargs,
     ):
+        configured_visibility = os.environ.get("PROJECT_VISIBILITY_ENABLED", "false")
+        if configured_visibility not in ("true", "false"):
+            raise ValueError("PROJECT_VISIBILITY_ENABLED must be true or false")
+        self.project_visibility_enabled = configured_visibility == "true"
+        if self.project_visibility_enabled and cache_versioned:
+            raise ValueError(
+                "Project visibility preparation requires an unversioned snapshot into new indices"
+            )
         self.converter_class = converter_class
 
         self.indexd_client = indexd_client
@@ -186,7 +197,9 @@ class GDCElasticsearch:
         self.no_parallel_bulk = kwargs.get("no_parallel_bulk", False)
 
         if index_prefix:
-            self.index_names = utils.get_index_names(index_prefix, INDEX_MAPPINGS.keys())
+            self.index_names = utils.get_index_names(
+                index_prefix, INDEX_MAPPINGS.keys()
+            )
 
         if index_alias_prefix:
             self.index_aliases = utils.get_index_names(
@@ -243,13 +256,17 @@ class GDCElasticsearch:
         with self.graph.session_scope() as session, session.no_autoflush:
             logger.info("Caching database")
 
-            self.event_logger("Caching", "Started postgres caching.", tags=["stage:caching"])
+            self.event_logger(
+                "Caching", "Started postgres caching.", tags=["stage:caching"]
+            )
 
             cache_start_time = datetime.datetime.now()
             converter.cache_database()
             cache_end_time = datetime.datetime.now()
 
-            logger.info("ANALYSIS: Loaded data in %s", cache_end_time - cache_start_time)
+            logger.info(
+                "ANALYSIS: Loaded data in %s", cache_end_time - cache_start_time
+            )
 
             self.event_logger(
                 "Denormalization",
@@ -259,9 +276,16 @@ class GDCElasticsearch:
 
             cases, files, annotations, projects = converter.denormalize_all()
 
+            if self.project_visibility_enabled:
+                cases, files, annotations, projects = prepare_build(
+                    cases, files, annotations, projects, converter.file_metadata
+                )
+
             denom_end_time = datetime.datetime.now()
 
-            logger.info("ANALYSIS: Denormalized data in %s", denom_end_time - cache_end_time)
+            logger.info(
+                "ANALYSIS: Denormalized data in %s", denom_end_time - cache_end_time
+            )
 
             session.rollback()
 
@@ -297,6 +321,10 @@ class GDCElasticsearch:
             project_ids=self.build_projects,
         )
 
+        # Opted-in uploads claim fresh destinations atomically at creation.
+        # Never delete from a destination another build may have just created.
+        if self.project_visibility_enabled:
+            return
         for index_type, index_name in self.index_names.items():
             self.release_helper.delete_docs_from_index(
                 index_name,
@@ -324,8 +352,17 @@ class GDCElasticsearch:
         if roll_alias and not self.index_aliases:
             raise ValueError("'index_alias_prefix' is required")
 
+        if self.project_visibility_enabled and self.es and not self.skip_es:
+            for index_name in self.index_names.values():
+                if self.es.indices.exists(index=index_name):
+                    raise ValueError(
+                        "Project visibility requires fresh index names; existing indices cannot be safely converted in place"
+                    )
+
         if send_events:
-            self.event_logger = get_statsd_event_logger(self.index_prefix, self.build_projects)
+            self.event_logger = get_statsd_event_logger(
+                self.index_prefix, self.build_projects
+            )
 
         versioned_files = self._cache_versioned_files()
 
@@ -420,7 +457,9 @@ class GDCElasticsearch:
         else:
             raise ValueError("Can only dump list or dict objects")
 
-        file_name = f"{path}/{file_nametag}-{datetime.datetime.now().isoformat()}.{extension}"
+        file_name = (
+            f"{path}/{file_nametag}-{datetime.datetime.now().isoformat()}.{extension}"
+        )
 
         with open(file_name, "w") as f:
             if isinstance(entries, list):
@@ -430,7 +469,9 @@ class GDCElasticsearch:
                 f.write(json.dumps(entries, indent=2))
 
     def _create_index(self, index_name, index_settings, mappings):
-        if not self.es.indices.exists(index=index_name):
+        if self.project_visibility_enabled or not self.es.indices.exists(
+            index=index_name
+        ):
             logger.info(f"Creating new index: '{index_name}'")
             self.es.indices.create(
                 index=index_name, settings=index_settings, mappings=mappings
@@ -468,6 +509,8 @@ class GDCElasticsearch:
 
         index_name = self.index_names[index_type]
         mapping = INDEX_MAPPINGS[index_type]
+        if self.project_visibility_enabled:
+            mapping = merge_ownership_mapping(mapping, docs)
 
         self._create_index(index_name, mappings.get_settings(), mapping)
 
@@ -664,4 +707,6 @@ class GDCElasticsearch:
             return
 
         for index_type, index_alias in self.index_aliases.items():
-            self.swap_index_alias(alias=index_alias, new_index=self.index_names[index_type])
+            self.swap_index_alias(
+                alias=index_alias, new_index=self.index_names[index_type]
+            )
