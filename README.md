@@ -270,6 +270,16 @@ lookup, not the case's graph project. Mixed public cases retain their clinical
 metadata while file children receive independent ownership. The builder also
 prepares contribution groups for safe case/project file counts.
 
+Legacy graph summaries count file nodes, while the file index merges graph nodes
+that share an IndexD `object_id`. Opted-in graph builds verify each case's complete
+embedded file list against its file-index GUID memberships, check project case
+coverage and file memberships, then reconcile counts/sizes to unique GUIDs before
+ownership preparation. A graph-node count difference alone is not evidence of an
+incomplete export. Missing GUIDs and inconsistent relationships still fail before
+index creation, with the affected scope and membership differences in the error.
+The launcher logs caching, denormalization and ownership-preparation durations,
+in addition to its total successful runtime.
+
 Preparation validates all ownership and summaries before any index is changed.
 An opted-in build may select projects, but must rebuild their complete served
 projection into fresh indices. Versioned builds and existing destination indices

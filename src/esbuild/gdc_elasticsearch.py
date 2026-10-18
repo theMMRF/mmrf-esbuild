@@ -21,6 +21,7 @@ from elasticsearch import helpers
 from indexclient import client
 
 from esbuild import utils
+from esbuild.graph_file_summaries import reconcile_graph_file_summaries
 from esbuild.project_file_visibility import prepare_build, merge_ownership_mapping
 from esbuild.graph.common import builder, mappings
 
@@ -255,6 +256,9 @@ class GDCElasticsearch:
     ) -> tuple[list, list, list, list]:
         with self.graph.session_scope() as session, session.no_autoflush:
             logger.info("Caching database")
+            stage_start = time.monotonic()
+            if self.project_visibility_enabled:
+                print("Visibility build: caching selected graph projects", flush=True)
 
             self.event_logger(
                 "Caching", "Started postgres caching.", tags=["stage:caching"]
@@ -267,6 +271,13 @@ class GDCElasticsearch:
             logger.info(
                 "ANALYSIS: Loaded data in %s", cache_end_time - cache_start_time
             )
+            if self.project_visibility_enabled:
+                print(
+                    f"Visibility build: graph cached in {time.monotonic() - stage_start:.1f}s; "
+                    "denormalizing documents",
+                    flush=True,
+                )
+                stage_start = time.monotonic()
 
             self.event_logger(
                 "Denormalization",
@@ -277,8 +288,20 @@ class GDCElasticsearch:
             cases, files, annotations, projects = converter.denormalize_all()
 
             if self.project_visibility_enabled:
+                print(
+                    f"Visibility build: denormalized in {time.monotonic() - stage_start:.1f}s "
+                    f"({len(cases)} cases, {len(files)} files, {len(projects)} projects); "
+                    "validating file memberships and preparing ownership",
+                    flush=True,
+                )
+                stage_start = time.monotonic()
+                reconcile_graph_file_summaries(cases, files, annotations, projects)
                 cases, files, annotations, projects = prepare_build(
                     cases, files, annotations, projects, converter.file_metadata
+                )
+                print(
+                    f"Visibility build: ownership prepared in {time.monotonic() - stage_start:.1f}s",
+                    flush=True,
                 )
 
             denom_end_time = datetime.datetime.now()
@@ -409,7 +432,15 @@ class GDCElasticsearch:
         extra_tags = ["status:succeeded"]
 
         try:
+            upload_start = time.monotonic()
+            if self.project_visibility_enabled:
+                print("Visibility build: uploading fresh indices", flush=True)
             self.deploy(cases, files, annotations, projects, roll_alias=roll_alias)
+            if self.project_visibility_enabled:
+                print(
+                    f"Visibility build: indices uploaded in {time.monotonic() - upload_start:.1f}s",
+                    flush=True,
+                )
         except Exception as exception:
             logger.exception(
                 f"Unable to deploy documents to {self.index_prefix}: {exception}, saving to {self.doc_output_dir}",

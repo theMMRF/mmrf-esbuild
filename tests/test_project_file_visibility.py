@@ -1,4 +1,6 @@
 import unittest
+from copy import deepcopy
+from esbuild.graph_file_summaries import reconcile_graph_file_summaries
 from esbuild.project_file_visibility import (
     indexd_read_auth,
     prepare_build,
@@ -195,6 +197,124 @@ class ProjectVisibilityTests(unittest.TestCase):
         self.assertFalse(properties[SUMMARY]["enabled"])
 
 
+class GraphSummaryTests(unittest.TestCase):
+    def fixture(self):
+        import ast
+        import __future__
+        from pathlib import Path
+
+        # Use the actual legacy merge routine: two graph nodes become one GUID
+        # document, but the original case/project summaries counted both nodes.
+        source = (
+            Path(__file__).resolve().parents[1] / "src/esbuild/graph/common/builder.py"
+        )
+        tree = ast.parse(source.read_text())
+        cls = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "GraphIndexBuilder"
+        )
+        method = next(
+            node
+            for node in cls.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_upsert_file_into_dict"
+        )
+        namespace = {}
+        exec(
+            compile(
+                ast.Module(body=[method], type_ignores=[]),
+                str(source),
+                "exec",
+                flags=__future__.annotations.compiler_flag,
+            ),
+            namespace,
+        )
+        files = deepcopy(FILES)
+        for file in files:
+            file["object_id"] = file["file_id"]
+        duplicate = deepcopy(files[1])
+        files[1]["file_id"] = "graph-meth-1"
+        duplicate["file_id"] = "graph-meth-2"
+        embedded = [files[0], files[1], duplicate]
+        case = {
+            "case_id": "c1",
+            "project": {"project_id": "MMRF-public"},
+            "files": deepcopy(embedded),
+            "summary": {"file_count": 3, "file_size": 209},
+        }
+        project = {
+            "project_id": "MMRF-public",
+            "summary": {"case_count": 1, "file_count": 3, "file_size": 209},
+        }
+        merged = {}
+        for file in embedded:
+            namespace["_upsert_file_into_dict"](None, merged, file)
+        return [case], list(merged.values()), [], [project]
+
+    def test_real_graph_merge_reconciles_counts_without_hiding_missing_files(self):
+        cases, files, annotations, projects = self.fixture()
+        self.assertEqual(len(files), 2)
+        cached = {row["did"]: row for row in MANIFEST}
+        cached.update({"graph-meth-1": MANIFEST[1], "graph-meth-2": MANIFEST[1]})
+        with self.assertRaisesRegex(ValueError, "file total"):
+            prepare_build(cases, files, annotations, projects, cached)
+        reconcile_graph_file_summaries(cases, files, annotations, projects)
+        cases, files, _, projects = prepare_build(
+            cases, files, annotations, projects, cached
+        )
+        self.assertEqual(cases[0]["summary"]["file_count"], 2)
+        self.assertEqual(cases[0]["summary"]["file_size"], 109)
+        self.assertEqual(
+            projects[0]["summary"], {"case_count": 1, "file_count": 2, "file_size": 109}
+        )
+        self.assertNotIn(AUTHZ, cases[0])
+        self.assertEqual(cases[0]["files"][1][AUTHZ], [B])
+        self.assertEqual(sum(row["file_count"] for row in cases[0][SUMMARY]), 2)
+
+    def test_missing_file_export_is_rejected_with_case_and_guid(self):
+        cases, files, annotations, projects = self.fixture()
+        with self.assertRaisesRegex(ValueError, "case 'c1'.*missing=.*meth"):
+            reconcile_graph_file_summaries(cases, files[:1], annotations, projects)
+        self.assertEqual(cases[0]["summary"]["file_count"], 3)
+
+    def test_equal_counts_do_not_hide_wrong_file_membership(self):
+        cases, files, annotations, projects = self.fixture()
+        files[1]["object_id"] = files[1]["file_id"] = "unexpected"
+        with self.assertRaisesRegex(ValueError, "case 'c1'.*unexpected"):
+            reconcile_graph_file_summaries(cases, files, annotations, projects)
+
+    def test_missing_embedded_graph_record_still_fails(self):
+        cases, files, annotations, projects = self.fixture()
+        cases[0]["files"].pop()
+        with self.assertRaisesRegex(ValueError, "case 'c1'.*legacy file_count"):
+            reconcile_graph_file_summaries(cases, files, annotations, projects)
+
+    def test_incomplete_project_case_export_still_fails(self):
+        cases, files, annotations, projects = self.fixture()
+        projects[0]["summary"]["case_count"] = 2
+        with self.assertRaisesRegex(
+            ValueError, "project 'MMRF-public'.*expected 2 cases"
+        ):
+            reconcile_graph_file_summaries(cases, files, annotations, projects)
+
+    def test_wrong_file_project_association_is_rejected(self):
+        cases, files, annotations, projects = self.fixture()
+        files[1]["cases"][0]["project"]["project_id"] = "MMRF-other"
+        with self.assertRaisesRegex(
+            ValueError, "project 'MMRF-public'.*missing=.*meth"
+        ):
+            reconcile_graph_file_summaries(cases, files, annotations, projects)
+
+    def test_nested_summaries_use_the_verified_complete_case_scope(self):
+        cases, files, annotations, projects = self.fixture()
+        files[0]["cases"][0]["summary"] = {"file_count": 3, "file_size": 209}
+        reconcile_graph_file_summaries(cases, files, annotations, projects)
+        self.assertEqual(
+            files[0]["cases"][0]["summary"], {"file_count": 2, "file_size": 109}
+        )
+
+
 class BuilderIntegrationTests(unittest.TestCase):
     """Exercise real builder entry points while replacing graph/ES dependencies."""
 
@@ -326,6 +446,63 @@ class BuilderIntegrationTests(unittest.TestCase):
             build.release_helper.delete_docs_from_index.assert_not_called()
             with self.assertRaisesRegex(ValueError, "unversioned snapshot"):
                 klass(factory, MagicMock(), cache_versioned=True)
+
+    def test_upload_boundary_reconciles_real_graph_merge_before_ownership(self):
+        import tempfile
+        from unittest.mock import MagicMock, patch
+
+        klass = self.builder_class()
+        raw = GraphSummaryTests().fixture()
+        converter = MagicMock()
+        converter.denormalize_all.return_value = raw
+        converter.file_metadata = {row["did"]: row for row in MANIFEST}
+        converter.file_metadata.update(
+            {"graph-meth-1": MANIFEST[1], "graph-meth-2": MANIFEST[1]}
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"PROJECT_VISIBILITY_ENABLED": "true"}),
+        ):
+            build = klass(
+                MagicMock(),
+                MagicMock(),
+                pg_driver=MagicMock(),
+                es=MagicMock(),
+                save_doc_path=directory,
+            )
+            cases, files, _, projects = build._cache_database(converter)
+            self.assertEqual(cases[0]["summary"]["file_count"], 2)
+            self.assertEqual(projects[0]["summary"]["file_count"], 2)
+            self.assertEqual(files[1][AUTHZ], [B])
+            build.es.indices.create.assert_not_called()
+
+    def test_upload_boundary_still_rejects_missing_file_before_index_creation(self):
+        import tempfile
+        from unittest.mock import MagicMock, patch
+
+        klass = self.builder_class()
+        converter = MagicMock()
+        converter.denormalize_all.return_value = (
+            [{"case_id": "c1", "files": FILES, "summary": {"file_count": 2}}],
+            FILES[:1],
+            [],
+            [],
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict("os.environ", {"PROJECT_VISIBILITY_ENABLED": "true"}),
+        ):
+            build = klass(
+                MagicMock(),
+                MagicMock(),
+                pg_driver=MagicMock(),
+                es=MagicMock(),
+                save_doc_path=directory,
+            )
+            with self.assertRaisesRegex(ValueError, "case 'c1'.*missing=.*meth"):
+                build._cache_database(converter)
+            build.es.indices.create.assert_not_called()
+            build.release_helper.delete_docs_from_index.assert_not_called()
 
     def test_existing_destinations_fail_before_cleanup_or_deploy(self):
         import tempfile
