@@ -314,3 +314,28 @@ remains enabled. It writes fresh prefixed indices with `roll_alias=False`; alias
 promotion remains an operator action. Opted-in builds skip destination cleanup
 and claim each index atomically, so concurrent builds cannot reuse another job's
 destination.
+
+After the normal file-ID normalization, export mutation inputs from the existing
+local physical indices with:
+
+```bash
+export PROJECT_VISIBILITY_ENABLED=true
+python -u src/esbuild/bin/export_visibility_inputs.py "$VIS_PREFIX" \
+  --stage "$VIS_STAGE" \
+  --mutation-repo "$HOME/mmrf-mutation-indexer" \
+  --indexd-base-url "https://dev-virtuallab.themmrf.org/index"
+```
+
+This reads the complete case/file/project/annotation sources, validates their file
+memberships and prepared ownership, and selects authenticated IndexD records
+referenced anywhere in those sources, including nonstandard reference fields and
+prefixed GUID aliases. Unreferenced legacy records do not need ownership cleanup
+to export this build. Referenced unowned or missing GUIDs still stop preparation;
+no `/open` or other policy is invented. Current ownership must match the prepared
+indices. Only after validation does it publish private, non-overwriting
+`indexd-manifest.json`, `files.ndjson` and `config-visibility.toml` in the stage
+directory. The override contains credentials and points to the rebuilt mutation
+driver, new physical input/output indices and stage-local logs. It retains normal
+resource/connection settings when supplied last to the mutation client.
+This exporter does not rebuild search indices or change aliases. Existing indices
+from the graph-summary compatibility revision remain valid input.

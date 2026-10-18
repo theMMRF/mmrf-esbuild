@@ -1,6 +1,7 @@
 import unittest
 from copy import deepcopy
 from esbuild.graph_file_summaries import reconcile_graph_file_summaries
+from esbuild.visibility_inputs import prepare_inputs, select_manifest, configuration
 from esbuild.project_file_visibility import (
     indexd_read_auth,
     prepare_build,
@@ -195,6 +196,172 @@ class ProjectVisibilityTests(unittest.TestCase):
         self.assertEqual(properties["files"]["properties"][AUTHZ], {"type": "keyword"})
         self.assertNotIn("labels", properties)
         self.assertFalse(properties[SUMMARY]["enabled"])
+
+
+class VisibilityExportTests(unittest.TestCase):
+    def sources(self, extra_manifest=(), extra_case=None):
+        case = {"case_id": "c1", "files": FILES, "summary": {"file_count": 2}}
+        case.update(extra_case or {})
+        manifest = MANIFEST + list(extra_manifest)
+        return {
+            "case": prepare_sources([case], manifest, FILES),
+            "file": prepare_sources(FILES, manifest, FILES),
+            "project": [],
+            "annotation": [],
+        }
+
+    def test_unreferenced_unowned_records_do_not_block_a_complete_projection(self):
+        manifest = prepare_inputs(
+            self.sources(), MANIFEST + [{"did": "old-unused", "authz": []}]
+        )
+        self.assertEqual({row["did"] for row in manifest["records"]}, {"rna", "meth"})
+
+    def test_referenced_unowned_record_is_identified_and_never_made_public(self):
+        rows = [MANIFEST[0], {"did": "meth", "authz": None}]
+        with self.assertRaisesRegex(ValueError, "Referenced IndexD GUID 'meth'.*authz"):
+            prepare_inputs(self.sources(), rows)
+
+    def test_missing_required_record_still_fails(self):
+        with self.assertRaisesRegex(ValueError, "missing from IndexD.*meth"):
+            prepare_inputs(self.sources(), MANIFEST[:1])
+
+    def test_references_in_nonstandard_fields_and_case_responses_are_in_scope(self):
+        extra = [{"did": "external", "authz": [B]}]
+        sources = self.sources(extra, {"related_guids": ["external"]})
+        manifest = prepare_inputs(sources, MANIFEST + extra)
+        self.assertIn("external", {row["did"] for row in manifest["records"]})
+        with self.assertRaisesRegex(ValueError, "Referenced IndexD GUID 'external'"):
+            prepare_inputs(sources, MANIFEST + [{"did": "external", "authz": []}])
+
+    def test_prefixed_guid_alias_selects_its_authoritative_record(self):
+        guid = "12345678-1234-1234-1234-123456789abc"
+        rows = [
+            {"did": "dg.test/" + guid, "authz": [B]},
+            {"did": "unused", "authz": []},
+        ]
+        manifest = select_manifest(rows, {guid}, {guid})
+        self.assertEqual(manifest["records"], rows[:1])
+
+    def test_same_counts_with_wrong_memberships_still_fail(self):
+        sources = self.sources()
+        sources["file"][1]["file_id"] = "different"
+        with self.assertRaisesRegex(ValueError, "membership mismatch.*c1"):
+            prepare_inputs(sources, MANIFEST)
+
+    def test_ownership_drift_requires_rebuild(self):
+        with self.assertRaisesRegex(ValueError, "Stored ownership differs"):
+            prepare_inputs(self.sources(), [MANIFEST[0], {"did": "meth", "authz": [A]}])
+
+    def test_override_uses_rebuilt_driver_and_private_credential_quoting(self):
+        import tomllib
+        from pathlib import Path
+
+        stage, repo = Path("/stage"), Path("/repo")
+        password = 'special \\ " $ !\n'
+        config = tomllib.loads(
+            configuration("vis-test", stage, repo, "service", password)
+        )
+        self.assertEqual(config["indexd"]["password"], password)
+        self.assertEqual(config["build"]["pex_file"], "/repo/driver-all")
+        self.assertEqual(config["build"]["driver"], "/repo/bin/driver.py")
+        self.assertEqual(len(config["elasticsearch"]["write"]["indices"]), 8)
+
+    def test_project_case_coverage_is_required_even_when_file_counts_match(self):
+        project = {
+            "project_id": "MMRF-public",
+            "code": "public",
+            "program": {"name": "MMRF"},
+            "summary": {"case_count": 1, "file_count": 2},
+        }
+        sources = self.sources(extra_case={"project": {"project_id": "MMRF-public"}})
+        sources["project"] = prepare_sources([project], MANIFEST, FILES)
+        self.assertEqual(len(prepare_inputs(sources, MANIFEST)["records"]), 2)
+        sources["project"][0]["summary"]["case_count"] = 2
+        with self.assertRaisesRegex(ValueError, "Incomplete case coverage"):
+            prepare_inputs(sources, MANIFEST)
+
+    def test_export_publication_is_private_and_does_not_overwrite_existing_inputs(self):
+        import os
+        from pathlib import Path
+        import stat
+        import sys
+        import tempfile
+        import types
+        from unittest.mock import MagicMock, patch
+        from esbuild import visibility_inputs
+
+        sources = self.sources()
+        es = MagicMock()
+        client = MagicMock()
+        documents = [
+            types.SimpleNamespace(did=row["did"], to_json=lambda row=row: row)
+            for row in MANIFEST
+        ]
+        documents.append(
+            types.SimpleNamespace(did="unused", to_json=lambda: {"authz": []})
+        )
+        client.list.return_value = documents
+        modules = {
+            "elasticsearch": types.SimpleNamespace(
+                Elasticsearch=lambda **kwargs: es,
+                helpers=types.SimpleNamespace(
+                    scan=lambda es, index, query: (
+                        {"_source": row} for row in sources[index.rsplit("_", 1)[1]]
+                    )
+                ),
+            ),
+            "esbuild.utils": types.SimpleNamespace(
+                ES_CONFIG={}, get_default_index_client=lambda: client
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage, repo = root / "stage", root / "repo"
+            stage.mkdir()
+            for name in (
+                "driver-all",
+                "bin/driver.py",
+                "run/conf/config.toml",
+                "run/conf/config-viz.toml",
+            ):
+                path = repo / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture")
+            argv = [
+                "export",
+                "vis-test",
+                "--stage",
+                str(stage),
+                "--mutation-repo",
+                str(repo),
+                "--indexd-base-url",
+                "https://example.test/index",
+            ]
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "PROJECT_VISIBILITY_ENABLED": "true",
+                        "INDEXD_USERNAME": "service",
+                        "INDEXD_PASSWORD": "test-only",
+                    },
+                ),
+                patch.dict(sys.modules, modules),
+                patch.object(sys, "argv", argv),
+            ):
+                visibility_inputs.main()
+                saved = (stage / "indexd-manifest.json").read_bytes()
+                for name in (
+                    "indexd-manifest.json",
+                    "files.ndjson",
+                    "config-visibility.toml",
+                ):
+                    self.assertEqual(stat.S_IMODE((stage / name).stat().st_mode), 0o600)
+                with self.assertRaisesRegex(SystemExit, "refusing to overwrite"):
+                    visibility_inputs.main()
+                self.assertEqual(saved, (stage / "indexd-manifest.json").read_bytes())
+                es.indices.create.assert_not_called()
+                es.indices.delete.assert_not_called()
 
 
 class GraphSummaryTests(unittest.TestCase):
