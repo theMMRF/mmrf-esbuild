@@ -257,3 +257,85 @@ and
 Read how to
 contribute
 [here](https://github.com/NCI-GDC/esbuild/blob/develop/CONTRIBUTING.md).
+
+
+## Opt-in project file metadata ownership
+
+Set `PROJECT_VISIBILITY_ENABLED=true` only for a complete build into fresh index
+names. The default is false and retains existing builder behavior. The feature
+uses authenticated IndexD lookup results already cached by the builder to attach
+canonical `_gen3_file_authz` ownership to root and embedded files. Graph `file_id`
+and IndexD `object_id` can differ; their ownership comes from the same trusted
+lookup, not the case's graph project. Mixed public cases retain their clinical
+metadata while file children receive independent ownership. The builder also
+prepares contribution groups for safe case/project file counts.
+
+Legacy graph summaries count file nodes, while the file index merges graph nodes
+that share an IndexD `object_id`. Opted-in graph builds verify each case's complete
+embedded file list against its file-index GUID memberships, check project case
+coverage and file memberships, then reconcile counts/sizes to unique GUIDs before
+ownership preparation. A graph-node count difference alone is not evidence of an
+incomplete export. Missing GUIDs and inconsistent relationships still fail before
+index creation, with the affected scope and membership differences in the error.
+The launcher logs caching, denormalization and ownership-preparation durations,
+in addition to its total successful runtime.
+
+Preparation validates all ownership and summaries before any index is changed.
+An opted-in build may select projects, but must rebuild their complete served
+projection into fresh indices. Versioned builds and existing destination indices
+are rejected before cleanup. It cannot incrementally update an old index. Use a new
+prefix and review/switch served aliases through the normal operator process.
+Existing object mappings cannot become nested in place. Fresh mappings preserve
+field definitions while adding ownership fields, making owned embedded objects
+nested and removing their parent copies. Build output adds no policy grants.
+
+Query services must support the matching contract. Changing user visibility
+later requires only usersync; ingestion or a change in file ownership requires a
+fresh projection build. Other genomic builders need the offline preparation step
+in the GitOps runbook; this repository builds the graph-derived case/file/project
+and annotation projections only. Keep private files out of other stores until
+those stores enforce the same ownership.
+
+Run isolated transformation/mapping tests without the graph model stack:
+`PYTHONPATH=src python -m unittest discover -s tests -p test_project_file_visibility.py -v`.
+Full graph build/integration acceptance remains required before dev rollout.
+
+Opted-in default builders require `INDEXD_USERNAME` and `INDEXD_PASSWORD` from
+server secrets. The prior anonymous client cannot export complete ownership once
+IndexD enforcement is enabled. The builder pins the MMRF client revision that
+forwards Basic credentials on GET, using its existing standard IndexD interface.
+Default opt-out builders retain their anonymous authentication tuple. Test the
+full graph build with this pinned client before rollout.
+
+The normal `run.sh` / `single.py` launcher retains its existing project list
+whether visibility is enabled or disabled. Ownership must cover every file in
+that selected projection, not unrelated graph projects. Selective graph caching
+remains enabled. It writes fresh prefixed indices with `roll_alias=False`; alias
+promotion remains an operator action. Opted-in builds skip destination cleanup
+and claim each index atomically, so concurrent builds cannot reuse another job's
+destination.
+
+After the normal file-ID normalization, export mutation inputs from the existing
+local physical indices with:
+
+```bash
+export PROJECT_VISIBILITY_ENABLED=true
+python -u src/esbuild/bin/export_visibility_inputs.py "$VIS_PREFIX" \
+  --stage "$VIS_STAGE" \
+  --mutation-repo "$HOME/mmrf-mutation-indexer" \
+  --indexd-base-url "https://dev-virtuallab.themmrf.org/index"
+```
+
+This reads the complete case/file/project/annotation sources, validates their file
+memberships and prepared ownership, and selects authenticated IndexD records
+referenced anywhere in those sources, including nonstandard reference fields and
+prefixed GUID aliases. Unreferenced legacy records do not need ownership cleanup
+to export this build. Referenced unowned or missing GUIDs still stop preparation;
+no `/open` or other policy is invented. Current ownership must match the prepared
+indices. Only after validation does it publish private, non-overwriting
+`indexd-manifest.json`, `files.ndjson` and `config-visibility.toml` in the stage
+directory. The override contains credentials and points to the rebuilt mutation
+driver, new physical input/output indices and stage-local logs. It retains normal
+resource/connection settings when supplied last to the mutation client.
+This exporter does not rebuild search indices or change aliases. Existing indices
+from the graph-summary compatibility revision remain valid input.

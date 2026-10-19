@@ -101,6 +101,7 @@ def get_gdc_elasticsearch(
         pg_driver=pg_driver,
         es=es_client,
         index_prefix=args.index,
+        # Visibility prepares the existing served scope; it must not broaden it.
         build_projects=build_projects,
         build_awg=False,
         index_alias_prefix=alias,
