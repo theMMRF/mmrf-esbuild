@@ -37,6 +37,13 @@ FILES = [
 
 
 class ProjectVisibilityTests(unittest.TestCase):
+    def test_owned_objects_inside_multidimensional_arrays_remain_nested(self):
+        source = {"batches": [[], [[FILES[1]]]]}
+        document = annotate(source, manifest_records(MANIFEST))
+        definition = ownership_mapping([document])["properties"]["batches"]
+        self.assertEqual(definition["type"], "nested")
+        self.assertEqual(definition["properties"][AUTHZ], {"type": "keyword"})
+
     def test_opt_in_requires_trusted_indexd_credentials(self):
         self.assertEqual(indexd_read_auth(False, None, None), (None, None))
         self.assertEqual(
