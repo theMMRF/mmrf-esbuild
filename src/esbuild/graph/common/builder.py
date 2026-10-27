@@ -1088,21 +1088,12 @@ class GraphIndexBuilder:
         :returns: bool
 
         """
-        # Active index files
-        if node._dictionary["category"] == "index_file":
-            return True
-
-        # Legacy index files
-        elif node.label == "file":
+        metadata = {}
+        if node.label == "file":
             # Set file metadata fields
             node = self._add_file_metadata_from_indexd(node)
-
-            for extension in self.index_file_extensions:
-                if getattr(node, "file_name", "").endswith(extension):
-                    return True
-
-        else:
-            return False
+            metadata = self.file_metadata.get(node.node_id, {}).get("metadata", {})
+        return validators.is_index_file(node, metadata, self.index_file_extensions)
 
     def _get_child_with_category(self, node, category):
         """Return iterable of neighbors from inbound edges with category."""
