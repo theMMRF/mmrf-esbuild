@@ -9,7 +9,8 @@ def is_index_file(node, indexd_metadata, index_file_extensions):
         return False
     if indexd_metadata.get("repository_only") == "true":
         return False
-    return any(node.file_name.endswith(extension) for extension in index_file_extensions)
+    file_name = getattr(node, "file_name", "")
+    return any(file_name.endswith(extension) for extension in index_file_extensions)
 
 
 def is_node_hidden(node):

@@ -20,6 +20,10 @@ class RepositoryFileTests(unittest.TestCase):
                 self.assertTrue(is_index_file(node(), metadata, [".bai"]))
                 self.assertFalse(is_index_file(node(name="reads.bam"), metadata, [".bai"]))
 
+    def test_file_without_a_name_is_not_an_index(self):
+        unnamed = SimpleNamespace(label="file", _dictionary={"category": "data_file"})
+        self.assertFalse(is_index_file(unnamed, {}, [".bai"]))
+
     def test_marker_does_not_override_dedicated_index_or_analysis_nodes(self):
         self.assertTrue(is_index_file(node(label="aligned_reads_index", category="index_file"), {"repository_only": "true"}, [".bai"]))
         for label in ("gene_expression", "aligned_reads", "case"):
