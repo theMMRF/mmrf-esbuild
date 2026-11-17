@@ -1,16 +1,7 @@
 VISIBLE_NODES = frozenset({"submitted_genotyping_array", "submitted_expression_array"})
-
-
-def is_index_file(node, indexd_metadata, index_file_extensions):
-    """Keep legacy index detection, allowing explicit generic repository downloads."""
-    if node._dictionary["category"] == "index_file":
-        return True
-    if node.label != "file":
-        return False
-    if indexd_metadata.get("repository_only") == "true":
-        return False
-    file_name = getattr(node, "file_name", "")
-    return any(file_name.endswith(extension) for extension in index_file_extensions)
+# Repository projects hold files as their provider submitted them (no harmonized
+# copies), so their submitted reads files are what users browse and download.
+REPOSITORY_PROJECTS = frozenset({"MMRF-MMRF_DFCI_Exhibit_A", "MMRF-MMRF_DFCI_Exhibit_C"})
 
 
 def is_node_hidden(node):
@@ -21,6 +12,9 @@ def is_node_hidden(node):
 
     """
     if node.label in VISIBLE_NODES:
+        return False
+
+    if node.label.startswith("submitted_") and node.project_id in REPOSITORY_PROJECTS:
         return False
 
     # Hide all submitted_* node types from indices
