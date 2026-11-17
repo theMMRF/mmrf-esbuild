@@ -1,4 +1,7 @@
 VISIBLE_NODES = frozenset({"submitted_genotyping_array", "submitted_expression_array"})
+# Repository projects hold files as their provider submitted them (no harmonized
+# copies), so their submitted reads files are what users browse and download.
+REPOSITORY_PROJECTS = frozenset({"MMRF-MMRF_DFCI_Exhibit_A", "MMRF-MMRF_DFCI_Exhibit_C"})
 
 
 def is_node_hidden(node):
@@ -9,6 +12,9 @@ def is_node_hidden(node):
 
     """
     if node.label in VISIBLE_NODES:
+        return False
+
+    if node.label.startswith("submitted_") and node.project_id in REPOSITORY_PROJECTS:
         return False
 
     # Hide all submitted_* node types from indices

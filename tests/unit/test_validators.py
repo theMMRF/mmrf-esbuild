@@ -17,6 +17,10 @@ from esbuild.graph.common import validators
         (models.SubmittedMethylationBetaValue(), True),
         (models.SubmittedTangentCopyNumber(), True),
         (models.SubmittedUnalignedReads(), True),
+        (models.SubmittedUnalignedReads(project_id="MMRF-COMMPASS"), True),
+        (models.SubmittedAlignedReads(project_id="MMRF-MMRF_DFCI_Exhibit_A"), False),
+        (models.SubmittedUnalignedReads(project_id="MMRF-MMRF_DFCI_Exhibit_C"), False),
+        (models.Archive(project_id="MMRF-MMRF_DFCI_Exhibit_A"), True),
         (models.RawMethylationArray(), True),
     ],
 )
