@@ -92,6 +92,10 @@ def get_gdc_elasticsearch(
         "MMRF-IA20",
         "MMRF-IA21",
         "MMRF-IA22",
+        # Repository-only projects: files as their providers submitted them.
+        "MMRF-MMRF_DFCI_Exhibit_A",
+        "MMRF-MMRF_DFCI_Exhibit_C",
+        "MMRF-MMRF_MSSM_SMM",
     ]
     alias = "graph"
 
