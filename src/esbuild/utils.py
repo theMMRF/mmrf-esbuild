@@ -17,6 +17,7 @@ from gdc_ng_models.models.submission import TransactionSnapshot
 from gdcdatamodel2 import models
 from gdcmodels import esutils
 from indexclient.client import IndexClient
+from esbuild.project_file_visibility import indexd_read_auth
 from psqlgraph import PsqlGraphDriver
 from queueclient import DepotQueueClient, RabbitMQClient
 from requests import HTTPError
@@ -68,7 +69,11 @@ def get_default_pg_driver():
 def get_default_index_client():
     return IndexClient(
         baseurl=os.getenv("INDEXD_HOST"),
-        auth=(None, None),  # Safe guard from potential updates
+        auth=indexd_read_auth(
+            os.getenv("PROJECT_VISIBILITY_ENABLED", "false") == "true",
+            os.getenv("INDEXD_USERNAME"),
+            os.getenv("INDEXD_PASSWORD"),
+        ),
     )
 
 
